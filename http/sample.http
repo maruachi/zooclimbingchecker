@@ -1,4 +1,4 @@
-GET http://localhost:7777
+GET http://localhost:7777/src/main/resources/index.html
 Host: localhost:7777
 Connection: keep-alive
 Cache-Control: max-age=0

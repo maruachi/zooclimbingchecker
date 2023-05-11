@@ -1,90 +1,120 @@
 package org.example;
 
-import javax.swing.*;
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
-public class MessageReader2 implements Closeable {
-
-    public static final Charset UTF_8 = StandardCharsets.UTF_8;
-    private static final int MAX_SIZE = 8192;
+public class MessageReader2 {
+    public static final int MAX_SIZE = 8192;
+    public static final int EOF = -1;
+    public static final String EMPTY_STRING = "";
+    public static final int NOT_FOUND_NEWLINE = -1;
+    private final BufferedInputStream bis;
+    private final Charset encoding;
     private final int bufferSize;
     private final int newLineStorageSize;
-    private final InputStream bufferedInputStream;
-    private final byte[] storage;
-    private int storageLength = 0;
+    private final byte[] buffer;
+    private final byte[] newLineStorage;
 
-    public MessageReader2(int bufferSize, int newLineStorageSize, InputStream bufferedInputStream, byte[] storage) {
-        if (storage == null) {
-            throw new RuntimeException("널 값을 참조합니다.");
-        }
+    public MessageReader2(BufferedInputStream bis, Charset encoding, int bufferSize, int newLineStorageSize) {
         if (bufferSize <= 0 || newLineStorageSize <= 0) {
-            throw new RuntimeException("유효하지 않은 저장 공간 크기입니다. bufferSize = " + bufferSize + " newLineStorageSize = " + newLineStorageSize);
-        }
-        if (bufferSize > MAX_SIZE || newLineStorageSize > MAX_SIZE) {
-            throw new RuntimeException("최대 크기를 초과합니다. bufferSize = " + bufferSize + " newLineStorageSize = " + newLineStorageSize);
+            throw new RuntimeException("내부 저장 공간 크기가 유효하지 않습니다. bufferSize = "
+                    + bufferSize + " newLineStorageSize = " + newLineStorageSize);
         }
 
+        if (bufferSize > MAX_SIZE || newLineStorageSize > MAX_SIZE) {
+            throw new RuntimeException("내부 저장 공간의 최대 크기 " + MAX_SIZE + " 보다 큰 저장 공간을 사용할 수 없습니다. bufferSize = "
+                    + bufferSize + " newLineStorageSize = " + newLineStorageSize);
+        }
+
+        if (bis == null) {
+            throw new RuntimeException("스트림이 널 값을 참조합니다.");
+        }
+
+        if (encoding == null) {
+            throw new RuntimeException("인코딩이 널 값을 참조합니다.");
+        }
+
+        this.bis = bis;
+        this.encoding = encoding;
         this.bufferSize = bufferSize;
         this.newLineStorageSize = newLineStorageSize;
-        this.bufferedInputStream = bufferedInputStream;
-        this.storage = storage;
+
+        this.buffer = new byte[this.bufferSize];
+        this.newLineStorage = new byte[this.newLineStorageSize];
     }
 
-    public static MessageReader2 createDefault(InputStream inputStream) {
-        return new MessageReader2(MAX_SIZE, MAX_SIZE, new BufferedInputStream(inputStream, MAX_SIZE), new byte[MAX_SIZE]);
+    public static MessageReader2 create(InputStream inputStream, Charset encoding, int bufferSize, int newLineStorageSize) {
+        return new MessageReader2(new BufferedInputStream(inputStream, bufferSize), encoding, bufferSize, newLineStorageSize);
+    }
+    public static MessageReader2 createDefault(InputStream inputStream, Charset encoding) {
+        return new MessageReader2(new BufferedInputStream(inputStream, MAX_SIZE), encoding, MAX_SIZE, MAX_SIZE);
     }
 
     public byte[] read() {
         try {
-            int len = bufferedInputStream.read(storage, storageLength, newLineStorageSize - storageLength);
-            if (len == -1) {
-                return null;
+            int len = bis.read(buffer);
+            if (len == EOF) {
+                return new byte[0];
             }
-            int totalLength = storageLength + len;
-            storageLength = 0;
-            return Arrays.copyOf(storage, totalLength);
+            return Arrays.copyOfRange(buffer, 0, len);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private String readByString() {
-        byte[] bytes = read();
-        if (bytes == null) {
-            return null;
-        }
-        return new String(bytes, UTF_8);
-    }
-
     public String readLine() {
-        StringBuilder builder = new StringBuilder(newLineStorageSize);
-        while (true) {
-            String string = readByString();
-            if (string == null) {
-                break;
+        try {
+            bis.mark(1);
+            int len = bis.read(newLineStorage);
+            if (len == EOF) {
+                bis.reset();
+                return EMPTY_STRING;
             }
 
-            int newLineIndex = string.indexOf('\n');
-            if (newLineIndex >= 0) {
-                String subString = string.substring(0, newLineIndex - 1);
-                builder.append(subString);
-
-                byte[] afterNewLineBytes = string.substring(newLineIndex + 1).getBytes(UTF_8);
-
-                System.arraycopy(afterNewLineBytes, 0, storage, 0, afterNewLineBytes.length);
-                break;
+            int newLineIndex = findNewLineIndex(len);
+            if (newLineIndex == NOT_FOUND_NEWLINE) {
+                bis.reset();
+                throw new RuntimeException("개행문자를 찾을 수 없습니다.");
             }
 
-            builder.append(string);
+            bis.reset();
+            bis.skip(newLineIndex + 1);
+
+            return new String(newLineStorage, 0, newLineIndex, encoding);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
-        return builder.toString();
     }
 
-    @Override
-    public void close() throws IOException {
-        bufferedInputStream.close();
+    public boolean hasMoreMessage() {
+        try {
+            bis.mark(1);
+            int len = bis.read();
+            if (len == -1) {
+                bis.reset();
+                return false;
+            }
+
+            bis.reset();
+            return true;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public boolean doesNotHasMoreMessage() {
+        return !hasMoreMessage();
+    }
+
+    private int findNewLineIndex(int len) {
+        for (int i = 0; i < len; i++) {
+            if (newLineStorage[i] == '\n') {
+                return i;
+            }
+        }
+        return NOT_FOUND_NEWLINE;
     }
 }
