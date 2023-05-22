@@ -8,13 +8,16 @@ public enum HttpMethod {
     private final String value;
 
     HttpMethod(String value) {
+        if (value == null) {
+            throw new RuntimeException("널 값을 참조하였습니다.");
+        }
         this.value = value;
     }
 
     public static HttpMethod of(String value) {
         return Arrays.stream(HttpMethod.values())
-                .filter(httpMethod -> httpMethod.value.equalsIgnoreCase(value))
+                .filter(method -> method.value.equalsIgnoreCase(value))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("유효한 httpMethod 값이 아닙니다. value = " + value));
+                .orElseThrow(() -> new RuntimeException("일치하는 http method가 없습니다. value = " + value));
     }
 }
